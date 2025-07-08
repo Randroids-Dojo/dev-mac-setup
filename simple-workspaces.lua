@@ -201,7 +201,24 @@ local function positionAppWindows(app, windowInfos, builtInScreen, builtInScreen
         -- Filter windows to only those on the built-in screen
         local screenWindows = {}
         for _, window in ipairs(windows) do
-            if window:screen():id() == builtInScreen:id() and window:isVisible() and window:isStandard() then
+            log("Checking window: " .. window:title() .. 
+                ", screen match: " .. tostring(window:screen():id() == builtInScreen:id()) ..
+                ", visible: " .. tostring(window:isVisible()) ..
+                ", standard: " .. tostring(window:isStandard()))
+            
+            -- For Finder, be more lenient with window standards since it has special window types
+            local includeWindow = false
+            if window:screen():id() == builtInScreen:id() and window:isVisible() then
+                if app:bundleID() == "com.apple.finder" then
+                    -- For Finder, include all visible windows regardless of standard status
+                    includeWindow = true
+                else
+                    -- For other apps, require standard windows
+                    includeWindow = window:isStandard()
+                end
+            end
+            
+            if includeWindow then
                 table.insert(screenWindows, window)
             end
         end
