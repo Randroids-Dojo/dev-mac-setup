@@ -781,33 +781,9 @@ applyWorkspaceWindows = function(workspace, builtInScreen, builtInScreenFrame)
             end)
         end
         
-        -- Move windows to current desktop if desktop is specified (with increased delay)
-        if workspace.spaceSupported and workspace.desktopIndex and hs.spaces then
-            hs.timer.doAfter(4, function()
-                local allSpaces = hs.spaces.allSpaces()
-                local screenUUID = builtInScreen:getUUID()
-                local screenSpaces = allSpaces[screenUUID] or {}
-                
-                if workspace.desktopIndex <= #screenSpaces then
-                    local targetSpaceID = screenSpaces[workspace.desktopIndex]
-                    
-                    -- Verify we're still on the correct desktop before moving windows
-                    local currentSpace = hs.spaces.focusedSpace()
-                    if currentSpace ~= targetSpaceID then
-                        log("Desktop switched unexpectedly, correcting...")
-                        log("🚀 CORRECTION CALLING hs.spaces.gotoSpace(" .. tostring(targetSpaceID) .. ")")
-                        hs.spaces.gotoSpace(targetSpaceID)
-                        hs.timer.doAfter(0.5, function()
-                            moveWorkspaceWindows(workspace, windowsByApp, builtInScreen, targetSpaceID)
-                        end)
-                    else
-                        moveWorkspaceWindows(workspace, windowsByApp, builtInScreen, targetSpaceID)
-                    end
-                else
-                    log("Cannot move windows: desktop " .. workspace.desktopIndex .. " no longer exists")
-                end
-            end)
-        end
+        -- Window movement temporarily disabled due to space ID instability
+        -- The windows are positioned correctly on the target desktop during creation
+        log("Skipping window movement - windows created and positioned on correct desktop")
         
         -- Final pass to ensure all workspace windows are visible
         hs.timer.doAfter(5, function()
