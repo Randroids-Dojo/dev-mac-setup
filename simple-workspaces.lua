@@ -672,11 +672,13 @@ applyWorkspaceWindows = function(workspace, builtInScreen, builtInScreenFrame)
                         local windowsToCreate = requiredWindowCount - currentWindowCount
                         log("Need to create " .. windowsToCreate .. " additional windows for " .. app:name())
                         
-                        -- Create all windows first
-                        for i = 1, windowsToCreate do
-                            hs.timer.doAfter(i * 0.3, function()
-                                log("Creating new window " .. i .. " for " .. app:name())
-                                -- Try different methods to create new window
+                        -- Create windows sequentially and verify creation
+                        local function createWindowAndVerify(windowIndex)
+                            if windowIndex <= windowsToCreate then
+                                log("Creating new window " .. windowIndex .. " for " .. app:name())
+                                local windowCountBefore = #app:allWindows()
+                                
+                                -- Create the window
                                 if app:bundleID() == "com.apple.finder" then
                                     -- Finder uses a different menu item
                                     if not app:selectMenuItem({"File", "New Finder Window"}) then
@@ -689,14 +691,26 @@ applyWorkspaceWindows = function(workspace, builtInScreen, builtInScreenFrame)
                                         end
                                     end
                                 end
-                            end)
+                                
+                                -- Wait and verify window was created
+                                hs.timer.doAfter(0.5, function()
+                                    local windowCountAfter = #app:allWindows()
+                                    log("Window creation " .. windowIndex .. ": before=" .. windowCountBefore .. ", after=" .. windowCountAfter)
+                                    
+                                    -- Create next window
+                                    createWindowAndVerify(windowIndex + 1)
+                                end)
+                            else
+                                -- All windows created, now position them
+                                log("All windows created, positioning...")
+                                hs.timer.doAfter(1, function()
+                                    positionAppWindows(app, windowInfos, builtInScreen, builtInScreenFrame)
+                                end)
+                            end
                         end
                         
-                        -- Wait longer for all windows to be created, then position
-                        hs.timer.doAfter((windowsToCreate * 0.3) + 2, function()
-                            log("Positioning windows after creation delay...")
-                            positionAppWindows(app, windowInfos, builtInScreen, builtInScreenFrame)
-                        end)
+                        -- Start creating windows
+                        createWindowAndVerify(1)
                     else
                         -- Position existing windows immediately
                         positionAppWindows(app, windowInfos, builtInScreen, builtInScreenFrame)
