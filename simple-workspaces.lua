@@ -688,9 +688,21 @@ applyWorkspaceWindows = function(workspace, builtInScreen, builtInScreenFrame)
                     hs.timer.doAfter(1, function()
                     local existingWindows = app:allWindows()
                     local requiredWindowCount = #windowInfos
-                    local currentWindowCount = #existingWindows
                     
-                    log("App: " .. app:name() .. " - Required windows: " .. requiredWindowCount .. ", Current windows: " .. currentWindowCount)
+                    -- For Finder, count only standard windows for creation purposes
+                    local standardWindowCount = 0
+                    if app:bundleID() == "com.apple.finder" then
+                        for _, window in ipairs(existingWindows) do
+                            if window:isStandard() and window:title() ~= "" then
+                                standardWindowCount = standardWindowCount + 1
+                            end
+                        end
+                        log("App: " .. app:name() .. " - Required windows: " .. requiredWindowCount .. ", Standard windows: " .. standardWindowCount .. ", All windows: " .. #existingWindows)
+                        currentWindowCount = standardWindowCount
+                    else
+                        currentWindowCount = #existingWindows
+                        log("App: " .. app:name() .. " - Required windows: " .. requiredWindowCount .. ", Current windows: " .. currentWindowCount)
+                    end
                     
                     -- Create additional windows if needed
                     if currentWindowCount < requiredWindowCount then
@@ -701,7 +713,18 @@ applyWorkspaceWindows = function(workspace, builtInScreen, builtInScreenFrame)
                         local function createWindowAndVerify(windowIndex)
                             if windowIndex <= windowsToCreate then
                                 log("Creating new window " .. windowIndex .. " for " .. app:name())
-                                local windowCountBefore = #app:allWindows()
+                                local allWindowsBefore = app:allWindows()
+                                local windowCountBefore = #allWindowsBefore
+                                
+                                -- For Finder, also count standard windows before
+                                local standardCountBefore = 0
+                                if app:bundleID() == "com.apple.finder" then
+                                    for _, window in ipairs(allWindowsBefore) do
+                                        if window:isStandard() and window:title() ~= "" then
+                                            standardCountBefore = standardCountBefore + 1
+                                        end
+                                    end
+                                end
                                 
                                 -- Create the window
                                 if app:bundleID() == "com.apple.finder" then
@@ -719,8 +742,21 @@ applyWorkspaceWindows = function(workspace, builtInScreen, builtInScreenFrame)
                                 
                                 -- Wait and verify window was created
                                 hs.timer.doAfter(0.5, function()
-                                    local windowCountAfter = #app:allWindows()
-                                    log("Window creation " .. windowIndex .. ": before=" .. windowCountBefore .. ", after=" .. windowCountAfter)
+                                    local allWindowsAfter = app:allWindows()
+                                    local windowCountAfter = #allWindowsAfter
+                                    
+                                    -- For Finder, also count standard windows
+                                    local standardCountAfter = 0
+                                    if app:bundleID() == "com.apple.finder" then
+                                        for _, window in ipairs(allWindowsAfter) do
+                                            if window:isStandard() and window:title() ~= "" then
+                                                standardCountAfter = standardCountAfter + 1
+                                            end
+                                        end
+                                        log("Window creation " .. windowIndex .. ": before=" .. windowCountBefore .. ", after=" .. windowCountAfter .. " (standard before: " .. standardCountBefore .. ", standard after: " .. standardCountAfter .. ")")
+                                    else
+                                        log("Window creation " .. windowIndex .. ": before=" .. windowCountBefore .. ", after=" .. windowCountAfter)
+                                    end
                                     
                                     -- Create next window
                                     createWindowAndVerify(windowIndex + 1)
