@@ -672,8 +672,9 @@ applyWorkspaceWindows = function(workspace, builtInScreen, builtInScreenFrame)
                         local windowsToCreate = requiredWindowCount - currentWindowCount
                         log("Need to create " .. windowsToCreate .. " additional windows for " .. app:name())
                         
+                        -- Create all windows first
                         for i = 1, windowsToCreate do
-                            hs.timer.doAfter(i * 0.5, function()
+                            hs.timer.doAfter(i * 0.3, function()
                                 log("Creating new window " .. i .. " for " .. app:name())
                                 -- Try different methods to create new window
                                 if app:bundleID() == "com.apple.finder" then
@@ -691,8 +692,9 @@ applyWorkspaceWindows = function(workspace, builtInScreen, builtInScreenFrame)
                             end)
                         end
                         
-                        -- Wait for windows to be created before positioning
-                        hs.timer.doAfter((windowsToCreate * 0.5) + 1, function()
+                        -- Wait longer for all windows to be created, then position
+                        hs.timer.doAfter((windowsToCreate * 0.3) + 2, function()
+                            log("Positioning windows after creation delay...")
                             positionAppWindows(app, windowInfos, builtInScreen, builtInScreenFrame)
                         end)
                     else
@@ -706,7 +708,7 @@ applyWorkspaceWindows = function(workspace, builtInScreen, builtInScreenFrame)
         
         -- Move windows to current desktop if desktop is specified (with increased delay)
         if workspace.spaceSupported and workspace.desktopIndex and hs.spaces then
-            hs.timer.doAfter(3, function()
+            hs.timer.doAfter(4, function()
                 local allSpaces = hs.spaces.allSpaces()
                 local screenUUID = builtInScreen:getUUID()
                 local screenSpaces = allSpaces[screenUUID] or {}
@@ -733,7 +735,7 @@ applyWorkspaceWindows = function(workspace, builtInScreen, builtInScreenFrame)
         end
         
         -- Final pass to ensure all workspace windows are visible
-        hs.timer.doAfter(3, function()
+        hs.timer.doAfter(5, function()
             log("Final pass: ensuring all workspace windows are visible")
             for bundleID, _ in pairs(windowsByApp) do
                 local app = hs.application.get(bundleID)
