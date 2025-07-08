@@ -10,7 +10,9 @@ local config = {
 local state = {
     workspaces = {},
     chooser = nil,
-    shortcuts = {} -- Track bound shortcuts
+    shortcuts = {}, -- Track bound shortcuts
+    spaceWatcher = nil,
+    lastSpace = nil
 }
 
 -- Utility functions
@@ -154,7 +156,7 @@ local function getAllWindowInfo()
     local builtInScreen = getBuiltInScreen()
     
     for _, app in ipairs(apps) do
-        if app:bundleID() ~= "com.apple.finder" and app:bundleID() ~= "com.apple.dock" then
+        if app:bundleID() ~= "com.apple.dock" then
             for _, window in ipairs(app:allWindows()) do
                 if window:isVisible() and window:isStandard() then
                     local screen = window:screen()
@@ -251,6 +253,9 @@ local function positionAppWindows(app, windowInfos, builtInScreen, builtInScreen
                         log("Setting frame for window " .. i .. ": x=" .. newFrame.x .. ", y=" .. newFrame.y .. ", w=" .. newFrame.w .. ", h=" .. newFrame.h)
                         window:setFrame(newFrame)
                     end
+                    -- Ensure window is visible and raised
+                    window:unminimize()
+                    window:raise()
                 end)
             else
                 log("Warning: Could not find window " .. i .. " for positioning")
@@ -259,17 +264,353 @@ local function positionAppWindows(app, windowInfos, builtInScreen, builtInScreen
     end)
 end
 
+-- Forward declarations
+local applyWorkspaceWindows
+local moveWorkspaceWindows
+local isWorkspaceAlreadyActive
+
 -- Apply workspace configuration
 local function applyWorkspace(workspace)
-    log("Applying workspace: " .. workspace.name)
+    log("=== APPLYING WORKSPACE: " .. workspace.name .. " ===")
     
     local builtInScreen = getBuiltInScreen()
     local builtInScreenFrame = builtInScreen:frame()
     
+    -- Get current desktop info for debugging
+    if workspace.spaceSupported and workspace.desktopIndex and hs.spaces then
+        local allSpaces = hs.spaces.allSpaces()
+        local screenUUID = builtInScreen:getUUID()
+        local screenSpaces = allSpaces[screenUUID] or {}
+        local currentSpace = hs.spaces.focusedSpace()
+        
+        local currentDesktopIndex = nil
+        for index, spaceID in ipairs(screenSpaces) do
+            if spaceID == currentSpace then
+                currentDesktopIndex = index
+                break
+            end
+        end
+        
+        log("Current desktop: " .. tostring(currentDesktopIndex) .. ", Target desktop: " .. tostring(workspace.desktopIndex))
+    end
+    
+    -- Fast path: Check if workspace is already correctly set up
+    log("Checking if workspace is already active...")
+    if isWorkspaceAlreadyActive(workspace, builtInScreen) then
+        log("*** WORKSPACE ALREADY ACTIVE - NO CHANGES NEEDED ***")
+        hs.alert.show("✓ " .. workspace.name .. " (already active)")
+        return
+    else
+        log("*** WORKSPACE NOT DETECTED AS ACTIVE - PROCEEDING WITH SETUP ***")
+    end
+    
+    -- Try fast desktop switch - switch first, then validate
+    if workspace.spaceSupported and workspace.desktopIndex and hs.spaces then
+        local allSpaces = hs.spaces.allSpaces()
+        local screenUUID = builtInScreen:getUUID()
+        local screenSpaces = allSpaces[screenUUID] or {}
+        
+        if workspace.desktopIndex <= #screenSpaces then
+            local targetSpaceID = screenSpaces[workspace.desktopIndex]
+            local currentSpace = hs.spaces.focusedSpace()
+            
+            log("Target desktop " .. workspace.desktopIndex .. " has current space ID: " .. tostring(targetSpaceID))
+            
+            -- Only do this check if we're NOT already on the target desktop
+            if currentSpace ~= targetSpaceID then
+                log("Attempting fast desktop switch to desktop " .. workspace.desktopIndex)
+                log("🚀 CALLING hs.spaces.gotoSpace(" .. tostring(targetSpaceID) .. ") for fast switch")
+                hs.spaces.gotoSpace(targetSpaceID)
+                
+                -- Wait for switch, then validate
+                hs.timer.doAfter(0.5, function()
+                    log("Validating fast switch - checking if workspace is now correctly set up")
+                    if isWorkspaceAlreadyActive(workspace, builtInScreen) then
+                        log("✅ Fast switch successful - workspace is correctly set up")
+                        hs.alert.show("→ " .. workspace.name .. " (Desktop " .. workspace.desktopIndex .. ")")
+                    else
+                        log("❌ Fast switch validation failed - proceeding with full workspace setup")
+                        applyWorkspaceWindows(workspace, builtInScreen, builtInScreenFrame)
+                    end
+                end)
+                return
+            end
+        end
+    end
+    
+    -- Handle desktop switching if supported
+    if workspace.spaceSupported and workspace.desktopIndex and hs.spaces then
+        log("Workspace has desktop index: " .. tostring(workspace.desktopIndex))
+        
+        -- Get current desktop info
+        local allSpaces = hs.spaces.allSpaces()
+        local screenUUID = builtInScreen:getUUID()
+        local screenSpaces = allSpaces[screenUUID] or {}
+        
+        log("Available desktops: " .. #screenSpaces .. ", target desktop: " .. tostring(workspace.desktopIndex))
+        
+        -- Check if the desktop index is valid
+        if workspace.desktopIndex <= #screenSpaces then
+            local targetSpaceID = screenSpaces[workspace.desktopIndex]
+            
+            -- Get current desktop index
+            local currentSpace = hs.spaces.focusedSpace()
+            local currentDesktopIndex = nil
+            for index, spaceID in ipairs(screenSpaces) do
+                if spaceID == currentSpace then
+                    currentDesktopIndex = index
+                    break
+                end
+            end
+            
+            log("Current desktop: " .. tostring(currentDesktopIndex) .. ", Target desktop: " .. tostring(workspace.desktopIndex))
+            
+            if currentDesktopIndex ~= workspace.desktopIndex then
+                -- Switch to the target desktop
+                log("Switching to desktop " .. workspace.desktopIndex .. " (space ID: " .. tostring(targetSpaceID) .. ")")
+                log("🚀 CALLING hs.spaces.gotoSpace(" .. tostring(targetSpaceID) .. ") for full workspace setup")
+                hs.spaces.gotoSpace(targetSpaceID)
+                -- Wait longer for desktop switch to complete and ensure we're on the right desktop
+                hs.timer.doAfter(1.5, function()
+                    -- Double-check we're on the right desktop before proceeding
+                    local currentSpace = hs.spaces.focusedSpace()
+                    if currentSpace == targetSpaceID then
+                        log("Confirmed on correct desktop, applying workspace")
+                        applyWorkspaceWindows(workspace, builtInScreen, builtInScreenFrame)
+                    else
+                        log("Desktop switch failed, retrying...")
+                        log("🚀 RETRY CALLING hs.spaces.gotoSpace(" .. tostring(targetSpaceID) .. ")")
+                        hs.spaces.gotoSpace(targetSpaceID)
+                        hs.timer.doAfter(1.0, function()
+                            applyWorkspaceWindows(workspace, builtInScreen, builtInScreenFrame)
+                        end)
+                    end
+                end)
+            else
+                log("Already on correct desktop")
+                applyWorkspaceWindows(workspace, builtInScreen, builtInScreenFrame)
+            end
+            return
+        else
+            log("Desktop index " .. workspace.desktopIndex .. " no longer exists (only " .. #screenSpaces .. " desktops available)")
+            -- Could create a new desktop here if needed, but for now just apply normally
+        end
+    end
+    
+    -- If spaces not supported or failed, apply normally
+    applyWorkspaceWindows(workspace, builtInScreen, builtInScreenFrame)
+end
+
+-- Helper function to check if workspace is already correctly set up
+isWorkspaceAlreadyActive = function(workspace, builtInScreen)
+    log("=== CHECKING IF WORKSPACE IS ALREADY ACTIVE ===")
+    
+    if not workspace.spaceSupported or not workspace.desktopIndex or not hs.spaces then
+        log("Space support not available")
+        return false
+    end
+    
+    -- Check if we're on the correct desktop
+    local allSpaces = hs.spaces.allSpaces()
+    local screenUUID = builtInScreen:getUUID()
+    local screenSpaces = allSpaces[screenUUID] or {}
+    
+    log("Available desktops: " .. #screenSpaces .. ", target desktop: " .. workspace.desktopIndex)
+    
+    if workspace.desktopIndex > #screenSpaces then
+        log("Target desktop doesn't exist")
+        return false
+    end
+    
+    -- Get the CURRENT space ID for the target desktop index (not the saved one)
+    local targetSpaceID = screenSpaces[workspace.desktopIndex]
+    local currentSpace = hs.spaces.focusedSpace()
+    
+    log("Desktop check: current space=" .. tostring(currentSpace) .. ", target space=" .. tostring(targetSpaceID) .. " (desktop " .. workspace.desktopIndex .. ")")
+    
+    if currentSpace ~= targetSpaceID then
+        log("❌ Not on correct desktop")
+        return false
+    else
+        log("✅ On correct desktop")
+    end
+    
+    -- Quick check: if we're on the right desktop and have the right number of windows, assume it's correct
+    local quickCheck = true
+    local windowsByApp = {}
+    for _, windowInfo in ipairs(workspace.windows) do
+        if not windowsByApp[windowInfo.bundleID] then
+            windowsByApp[windowInfo.bundleID] = 0
+        end
+        windowsByApp[windowInfo.bundleID] = windowsByApp[windowInfo.bundleID] + 1
+    end
+    
+    for bundleID, expectedCount in pairs(windowsByApp) do
+        local app = hs.application.get(bundleID)
+        if not app then
+            quickCheck = false
+            break
+        end
+        
+        local actualCount = 0
+        local windowsOnCurrentDesktop = 0
+        
+        for _, window in ipairs(app:allWindows()) do
+            if window:screen():id() == builtInScreen:id() and window:isVisible() and window:isStandard() then
+                actualCount = actualCount + 1
+                
+                -- Check if window is on current desktop (we're already on target desktop)
+                local windowSpaces = hs.spaces.windowSpaces(window)
+                if windowSpaces and #windowSpaces > 0 then
+                    for _, spaceID in ipairs(windowSpaces) do
+                        if spaceID == currentSpace then
+                            windowsOnCurrentDesktop = windowsOnCurrentDesktop + 1
+                            break
+                        end
+                    end
+                end
+            end
+        end
+        
+        log("Quick check - " .. bundleID .. ": expected=" .. expectedCount .. ", actual=" .. actualCount .. ", on current desktop=" .. windowsOnCurrentDesktop)
+        
+        -- For quick check, we want exact match on current desktop (which is the target)
+        if windowsOnCurrentDesktop ~= expectedCount then
+            quickCheck = false
+            break
+        end
+    end
+    
+    if quickCheck then
+        log("✅ Quick check passed - right desktop, right number of windows, assuming workspace is active")
+        return true
+    end
+    
+    log("Quick check failed, doing detailed position check...")
+    
+    -- Check if all required windows exist and are positioned correctly
+    local tolerance = 50 -- 50 pixel tolerance for window position differences
+    local builtInScreenFrame = builtInScreen:frame()
+    
+    log("Checking " .. #workspace.windows .. " windows for correct positioning...")
+    
+    -- Use a smarter approach for apps with multiple windows
+    local windowsByApp = {}
+    for _, windowInfo in ipairs(workspace.windows) do
+        if not windowsByApp[windowInfo.bundleID] then
+            windowsByApp[windowInfo.bundleID] = {}
+        end
+        table.insert(windowsByApp[windowInfo.bundleID], windowInfo)
+    end
+    
+    for bundleID, expectedWindows in pairs(windowsByApp) do
+        log("=== CHECKING APP: " .. bundleID .. " ===")
+        local app = hs.application.get(bundleID)
+        if not app then
+            log("❌ App not running: " .. bundleID)
+            return false
+        end
+        
+        -- Get all actual windows for this app on the built-in screen
+        local actualWindows = {}
+        for _, window in ipairs(app:allWindows()) do
+            if window:screen():id() == builtInScreen:id() and window:isVisible() and window:isStandard() then
+                table.insert(actualWindows, window)
+                log("Found window: " .. window:title() .. " (ID: " .. window:id() .. ")")
+            end
+        end
+        
+        log("Window count - Expected: " .. #expectedWindows .. ", Actual: " .. #actualWindows)
+        
+        if #actualWindows < #expectedWindows then
+            log("❌ Not enough windows for " .. bundleID)
+            return false
+        end
+        
+        -- Try to match windows by position first, then by title
+        local matchedWindows = {}
+        for i, windowInfo in ipairs(expectedWindows) do
+            local expectedFrame = {
+                x = builtInScreenFrame.x + (windowInfo.frame.x * builtInScreenFrame.w),
+                y = builtInScreenFrame.y + (windowInfo.frame.y * builtInScreenFrame.h),
+                w = windowInfo.frame.w * builtInScreenFrame.w,
+                h = windowInfo.frame.h * builtInScreenFrame.h
+            }
+            
+            local bestMatch = nil
+            local bestScore = math.huge
+            
+            for _, window in ipairs(actualWindows) do
+                -- Skip if this window is already matched
+                local alreadyMatched = false
+                for _, matched in ipairs(matchedWindows) do
+                    if matched:id() == window:id() then
+                        alreadyMatched = true
+                        break
+                    end
+                end
+                
+                if not alreadyMatched then
+                    local currentFrame = window:frame()
+                    local xDiff = math.abs(currentFrame.x - expectedFrame.x)
+                    local yDiff = math.abs(currentFrame.y - expectedFrame.y)
+                    local wDiff = math.abs(currentFrame.w - expectedFrame.w)
+                    local hDiff = math.abs(currentFrame.h - expectedFrame.h)
+                    
+                    local totalDiff = xDiff + yDiff + wDiff + hDiff
+                    
+                    if totalDiff < bestScore and 
+                       xDiff < tolerance and yDiff < tolerance and 
+                       wDiff < tolerance and hDiff < tolerance then
+                        bestMatch = window
+                        bestScore = totalDiff
+                    end
+                end
+            end
+            
+            if bestMatch then
+                table.insert(matchedWindows, bestMatch)
+                log("  ✅ Matched window " .. i .. ": " .. bestMatch:title() .. " (score: " .. bestScore .. "px)")
+            else
+                log("  ❌ Could not match window " .. i .. " (" .. windowInfo.title .. ") - no window within tolerance")
+                return false
+            end
+        end
+    end
+    
+    log("Workspace is already correctly set up!")
+    return true
+end
+
+-- Helper function to move windows to the correct desktop
+moveWorkspaceWindows = function(workspace, windowsByApp, builtInScreen, targetSpaceID)
+    log("Moving windows to desktop " .. workspace.desktopIndex .. " (space ID: " .. tostring(targetSpaceID) .. ")")
+    
+    for bundleID, windowInfos in pairs(windowsByApp) do
+        local app = hs.application.get(bundleID)
+        if app then
+            for _, window in ipairs(app:allWindows()) do
+                if window:screen():id() == builtInScreen:id() then
+                    -- Move window to the workspace's desktop
+                    local success = hs.spaces.moveWindowToSpace(window, targetSpaceID)
+                    if success then
+                        log("Moved window to desktop " .. workspace.desktopIndex .. ": " .. window:title())
+                    else
+                        log("Failed to move window to desktop: " .. window:title())
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Helper function to apply workspace windows
+applyWorkspaceWindows = function(workspace, builtInScreen, builtInScreenFrame)
+    
     -- Hide all apps on built-in screen
     local apps = hs.application.runningApplications()
     for _, app in ipairs(apps) do
-        if app:bundleID() ~= "com.apple.finder" and app:bundleID() ~= "com.apple.dock" then
+        if app:bundleID() ~= "com.apple.dock" then
             for _, window in ipairs(app:allWindows()) do
                 if window:screen():id() == builtInScreen:id() then
                     app:hide()
@@ -289,17 +630,28 @@ local function applyWorkspace(workspace)
             table.insert(windowsByApp[windowInfo.bundleID], windowInfo)
         end
         
-        -- Process each application
+        -- Process each application with staggered timing to avoid conflicts
+        local appIndex = 0
         for bundleID, windowInfos in pairs(windowsByApp) do
-            local app = hs.application.get(bundleID)
-            if not app then
-                app = hs.application.launchOrFocus(bundleID)
-            end
+            appIndex = appIndex + 1
+            local delay = appIndex * 0.5 -- Stagger app processing
             
-            if app then
-                app:activate()
+            hs.timer.doAfter(delay, function()
+                log("Processing application: " .. bundleID .. " with " .. #windowInfos .. " windows")
+                local app = hs.application.get(bundleID)
+                if not app then
+                    log("App not running, launching: " .. bundleID)
+                    app = hs.application.launchOrFocus(bundleID)
+                end
                 
-                hs.timer.doAfter(1, function()
+                if app then
+                    log("Activating app: " .. app:name())
+                    -- First unhide the app to ensure it's visible
+                    app:unhide()
+                    -- Then activate it
+                    app:activate()
+                    
+                    hs.timer.doAfter(1, function()
                     local existingWindows = app:allWindows()
                     local requiredWindowCount = #windowInfos
                     local currentWindowCount = #existingWindows
@@ -315,9 +667,16 @@ local function applyWorkspace(workspace)
                             hs.timer.doAfter(i * 0.5, function()
                                 log("Creating new window " .. i .. " for " .. app:name())
                                 -- Try different methods to create new window
-                                if not app:selectMenuItem({"File", "New Window"}) then
-                                    if not app:selectMenuItem({"Window", "New Window"}) then
+                                if app:bundleID() == "com.apple.finder" then
+                                    -- Finder uses a different menu item
+                                    if not app:selectMenuItem({"File", "New Finder Window"}) then
                                         hs.eventtap.keyStroke({"cmd"}, "n")
+                                    end
+                                else
+                                    if not app:selectMenuItem({"File", "New Window"}) then
+                                        if not app:selectMenuItem({"Window", "New Window"}) then
+                                            hs.eventtap.keyStroke({"cmd"}, "n")
+                                        end
                                     end
                                 end
                             end)
@@ -331,9 +690,55 @@ local function applyWorkspace(workspace)
                         -- Position existing windows immediately
                         positionAppWindows(app, windowInfos, builtInScreen, builtInScreenFrame)
                     end
-                end)
-            end
+                    end)
+                end
+            end)
         end
+        
+        -- Move windows to current desktop if desktop is specified (with increased delay)
+        if workspace.spaceSupported and workspace.desktopIndex and hs.spaces then
+            hs.timer.doAfter(3, function()
+                local allSpaces = hs.spaces.allSpaces()
+                local screenUUID = builtInScreen:getUUID()
+                local screenSpaces = allSpaces[screenUUID] or {}
+                
+                if workspace.desktopIndex <= #screenSpaces then
+                    local targetSpaceID = screenSpaces[workspace.desktopIndex]
+                    
+                    -- Verify we're still on the correct desktop before moving windows
+                    local currentSpace = hs.spaces.focusedSpace()
+                    if currentSpace ~= targetSpaceID then
+                        log("Desktop switched unexpectedly, correcting...")
+                        log("🚀 CORRECTION CALLING hs.spaces.gotoSpace(" .. tostring(targetSpaceID) .. ")")
+                        hs.spaces.gotoSpace(targetSpaceID)
+                        hs.timer.doAfter(0.5, function()
+                            moveWorkspaceWindows(workspace, windowsByApp, builtInScreen, targetSpaceID)
+                        end)
+                    else
+                        moveWorkspaceWindows(workspace, windowsByApp, builtInScreen, targetSpaceID)
+                    end
+                else
+                    log("Cannot move windows: desktop " .. workspace.desktopIndex .. " no longer exists")
+                end
+            end)
+        end
+        
+        -- Final pass to ensure all workspace windows are visible
+        hs.timer.doAfter(3, function()
+            log("Final pass: ensuring all workspace windows are visible")
+            for bundleID, _ in pairs(windowsByApp) do
+                local app = hs.application.get(bundleID)
+                if app then
+                    app:unhide()
+                    for _, window in ipairs(app:allWindows()) do
+                        if window:screen():id() == builtInScreen:id() then
+                            window:unminimize()
+                            window:raise()
+                        end
+                    end
+                end
+            end
+        end)
     end)
 end
 
@@ -383,11 +788,12 @@ local function updateChooserChoices()
         local windowCount = #workspace.windows
         local date = os.date("%Y-%m-%d %H:%M", workspace.created or os.time())
         local shortcutText = workspace.shortcutKey and (" • ⌘⌥⌃+" .. workspace.shortcutKey) or ""
+        local desktopText = workspace.spaceSupported and workspace.desktopIndex and (" • 🖥️ Desktop " .. workspace.desktopIndex) or ""
         
         -- Apply option
         table.insert(choices, {
             text = "🖥️  " .. workspace.name,
-            subText = windowCount .. " windows • " .. date .. shortcutText .. " • Press Enter to apply",
+            subText = windowCount .. " windows • " .. date .. shortcutText .. desktopText .. " • Press Enter to apply",
             workspace = workspace,
             action = "apply"
         })
@@ -399,6 +805,16 @@ local function updateChooserChoices()
             workspace = workspace,
             action = "delete"
         })
+        
+        -- Update desktop option (if workspace has space support)
+        if workspace.spaceSupported and hs.spaces then
+            table.insert(choices, {
+                text = "🔄 Update Desktop: " .. workspace.name,
+                subText = "Reassign this workspace to the current desktop",
+                workspace = workspace,
+                action = "updateSpace"
+            })
+        end
     end
     
     state.chooser:choices(choices)
@@ -430,11 +846,6 @@ function simpleWorkspaces.toggle()
     end
 end
 
-function simpleWorkspaces.showSaveDialog()
-    -- Show save dialog directly without opening main chooser first
-    handleSaveAction()
-end
-
 function simpleWorkspaces.saveCurrentDesktop(name, shortcutKey)
     local workspaceName = name or hs.dialog.textPrompt("Save Workspace", "Enter workspace name:", "", "Save", "Cancel")
     
@@ -447,11 +858,41 @@ function simpleWorkspaces.saveCurrentDesktop(name, shortcutKey)
     
     local windows = getAllWindowInfo()
     
+    -- Get current desktop index if hs.spaces is available
+    local currentDesktopIndex = nil
+    local spaceSupported = false
+    if hs.spaces then
+        spaceSupported = true
+        local builtInScreen = getBuiltInScreen()
+        local screenUUID = builtInScreen:getUUID()
+        
+        -- Get the focused space for this screen
+        local focusedSpace = hs.spaces.focusedSpace()
+        log("Focused space ID: " .. tostring(focusedSpace))
+        
+        -- Get all spaces for this screen to determine index
+        local allSpaces = hs.spaces.allSpaces()
+        local screenSpaces = allSpaces[screenUUID] or {}
+        log("Screen spaces: " .. hs.inspect(screenSpaces))
+        
+        -- Find the index of the focused space (1-based)
+        for index, spaceID in ipairs(screenSpaces) do
+            if spaceID == focusedSpace then
+                currentDesktopIndex = index
+                break
+            end
+        end
+        
+        log("Current desktop index: " .. tostring(currentDesktopIndex))
+    end
+    
     local newWorkspace = {
         name = workspaceName,
         windows = windows,
         created = os.time(),
-        shortcutKey = shortcutKey and shortcutKey ~= "" and shortcutKey or nil
+        shortcutKey = shortcutKey and shortcutKey ~= "" and shortcutKey or nil,
+        desktopIndex = currentDesktopIndex,
+        spaceSupported = spaceSupported
     }
     
     log("Workspace shortcut key after processing: '" .. tostring(newWorkspace.shortcutKey) .. "'")
@@ -788,6 +1229,44 @@ local function createChooserWithSave()
                         break
                     end
                 end
+            elseif choice.action == "updateSpace" then
+                -- Update workspace to use current desktop
+                if hs.spaces then
+                    local builtInScreen = getBuiltInScreen()
+                    local screenUUID = builtInScreen:getUUID()
+                    local focusedSpace = hs.spaces.focusedSpace()
+                    local allSpaces = hs.spaces.allSpaces()
+                    local screenSpaces = allSpaces[screenUUID] or {}
+                    
+                    -- Find current desktop index
+                    local currentDesktopIndex = nil
+                    for index, spaceID in ipairs(screenSpaces) do
+                        if spaceID == focusedSpace then
+                            currentDesktopIndex = index
+                            break
+                        end
+                    end
+                    
+                    if currentDesktopIndex then
+                        for i, workspace in ipairs(state.workspaces) do
+                            if workspace.name == choice.workspace.name then
+                                local oldDesktopIndex = state.workspaces[i].desktopIndex
+                                state.workspaces[i].desktopIndex = currentDesktopIndex
+                                -- Also clear old spaceID if it exists
+                                state.workspaces[i].spaceID = nil
+                                saveWorkspacesToFile()
+                                log("Updated workspace '" .. workspace.name .. "' from desktop " .. tostring(oldDesktopIndex) .. " to desktop " .. tostring(currentDesktopIndex))
+                                hs.alert.show("Updated workspace '" .. workspace.name .. "' to Desktop " .. currentDesktopIndex)
+                                updateChooserChoices()
+                                break
+                            end
+                        end
+                    else
+                        hs.alert.show("Could not determine current desktop")
+                    end
+                else
+                    hs.alert.show("Spaces not available")
+                end
             end
         end
     end)
@@ -801,6 +1280,11 @@ end
 
 -- Update the createChooser function
 createChooser = createChooserWithSave
+
+function simpleWorkspaces.showSaveDialog()
+    -- Show save dialog directly without opening main chooser first
+    handleSaveAction()
+end
 
 -- Shortcut management functions
 function simpleWorkspaces.bindWorkspaceShortcut(key, workspace, skipConflictCheck)
@@ -874,9 +1358,11 @@ function simpleWorkspaces.bindAllWorkspaceShortcuts()
     end
 end
 
--- Clean up invalid shortcut keys from saved workspaces
+-- Clean up invalid shortcut keys and space IDs from saved workspaces
 local function cleanupWorkspaces()
     local needsSave = false
+    
+    -- Clean up invalid shortcut keys
     for _, workspace in ipairs(state.workspaces) do
         if workspace.shortcutKey and not isValidShortcutKey(workspace.shortcutKey) then
             log("Removing invalid shortcut key '" .. workspace.shortcutKey .. "' from workspace: " .. workspace.name)
@@ -885,9 +1371,46 @@ local function cleanupWorkspaces()
         end
     end
     
+    -- Clean up and migrate from spaceID to desktopIndex if hs.spaces is available
+    if hs.spaces then
+        local allSpaces = hs.spaces.allSpaces()
+        local builtInScreen = getBuiltInScreen()
+        local screenUUID = builtInScreen:getUUID()
+        local screenSpaces = allSpaces[screenUUID] or {}
+        
+        log("Available desktops for cleanup: " .. #screenSpaces)
+        
+        for _, workspace in ipairs(state.workspaces) do
+            -- Migrate from old spaceID system to desktopIndex
+            if workspace.spaceSupported and workspace.spaceID and not workspace.desktopIndex then
+                -- Try to find desktop index for the old spaceID
+                for index, spaceID in ipairs(screenSpaces) do
+                    if spaceID == workspace.spaceID then
+                        workspace.desktopIndex = index
+                        log("Migrated workspace '" .. workspace.name .. "' from spaceID " .. workspace.spaceID .. " to desktop " .. index)
+                        needsSave = true
+                        break
+                    end
+                end
+                -- Remove old spaceID
+                workspace.spaceID = nil
+                needsSave = true
+            end
+            
+            -- Validate desktop indices
+            if workspace.spaceSupported and workspace.desktopIndex then
+                if workspace.desktopIndex > #screenSpaces then
+                    log("Removing invalid desktop index " .. tostring(workspace.desktopIndex) .. " from workspace: " .. workspace.name .. " (only " .. #screenSpaces .. " desktops available)")
+                    workspace.desktopIndex = nil
+                    needsSave = true
+                end
+            end
+        end
+    end
+    
     if needsSave then
         saveWorkspacesToFile()
-        log("Cleaned up invalid shortcut keys")
+        log("Cleaned up invalid shortcut keys and migrated to desktop indices")
     end
 end
 
@@ -924,9 +1447,56 @@ function simpleWorkspaces.getWorkspacesForHelp()
     return workspaceInfo
 end
 
+-- Desktop change monitoring
+local function startSpaceWatcher()
+    if hs.spaces then
+        local builtInScreen = getBuiltInScreen()
+        local screenUUID = builtInScreen:getUUID()
+        
+        -- Get initial space
+        local currentSpace = hs.spaces.focusedSpace()
+        local allSpaces = hs.spaces.allSpaces()
+        local screenSpaces = allSpaces[screenUUID] or {}
+        
+        local currentDesktopIndex = nil
+        for index, spaceID in ipairs(screenSpaces) do
+            if spaceID == currentSpace then
+                currentDesktopIndex = index
+                break
+            end
+        end
+        
+        state.lastSpace = currentSpace
+        log("🖥️ INITIAL DESKTOP: " .. tostring(currentDesktopIndex) .. " (Space ID: " .. tostring(currentSpace) .. ")")
+        
+        -- Watch for space changes
+        state.spaceWatcher = hs.spaces.watcher.new(function()
+            local newSpace = hs.spaces.focusedSpace()
+            if newSpace ~= state.lastSpace then
+                local newDesktopIndex = nil
+                local updatedSpaces = hs.spaces.allSpaces()[screenUUID] or {}
+                for index, spaceID in ipairs(updatedSpaces) do
+                    if spaceID == newSpace then
+                        newDesktopIndex = index
+                        break
+                    end
+                end
+                
+                log("🔄 DESKTOP CHANGE: " .. tostring(currentDesktopIndex) .. " → " .. tostring(newDesktopIndex) .. " (Space: " .. tostring(state.lastSpace) .. " → " .. tostring(newSpace) .. ")")
+                state.lastSpace = newSpace
+                currentDesktopIndex = newDesktopIndex
+            end
+        end)
+        
+        state.spaceWatcher:start()
+        log("Started desktop change monitoring")
+    end
+end
+
 -- Initialize
 loadWorkspacesFromFile()
 cleanupWorkspaces()
 simpleWorkspaces.bindAllWorkspaceShortcuts()
+startSpaceWatcher()
 
 return simpleWorkspaces

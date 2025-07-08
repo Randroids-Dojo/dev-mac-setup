@@ -2,7 +2,7 @@
 -- Author: Custom workspace automation
 
 -- Debug mode - set to true to see debug messages
-local DEBUG = false
+local DEBUG = true
 
 -- Load Simple Workspace Manager
 local visualWorkspaces = require("simple-workspaces")
