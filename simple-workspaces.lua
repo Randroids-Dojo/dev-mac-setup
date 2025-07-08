@@ -206,12 +206,12 @@ local function positionAppWindows(app, windowInfos, builtInScreen, builtInScreen
                 ", visible: " .. tostring(window:isVisible()) ..
                 ", standard: " .. tostring(window:isStandard()))
             
-            -- For Finder, be more lenient with window standards since it has special window types
+            -- Filter windows appropriately for positioning
             local includeWindow = false
             if window:screen():id() == builtInScreen:id() and window:isVisible() then
                 if app:bundleID() == "com.apple.finder" then
-                    -- For Finder, include all visible windows regardless of standard status
-                    includeWindow = true
+                    -- For Finder positioning, only include standard windows with titles
+                    includeWindow = window:isStandard() and window:title() ~= ""
                 else
                     -- For other apps, require standard windows
                     includeWindow = window:isStandard()
