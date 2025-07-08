@@ -608,12 +608,20 @@ moveWorkspaceWindows = function(workspace, windowsByApp, builtInScreen, targetSp
         if app then
             for _, window in ipairs(app:allWindows()) do
                 if window:screen():id() == builtInScreen:id() then
-                    -- Move window to the workspace's desktop
-                    local success = hs.spaces.moveWindowToSpace(window, targetSpaceID)
-                    if success then
-                        log("Moved window to desktop " .. workspace.desktopIndex .. ": " .. window:title())
+                    -- Only try to move standard windows or Finder windows with titles
+                    local shouldMoveWindow = window:isStandard() or 
+                                           (app:bundleID() == "com.apple.finder" and window:title() ~= "")
+                    
+                    if shouldMoveWindow then
+                        -- Move window to the workspace's desktop
+                        local success = hs.spaces.moveWindowToSpace(window, targetSpaceID)
+                        if success then
+                            log("Moved window to desktop " .. workspace.desktopIndex .. ": " .. window:title())
+                        else
+                            log("Failed to move window to desktop: " .. window:title())
+                        end
                     else
-                        log("Failed to move window to desktop: " .. window:title())
+                        log("Skipping window move (non-standard): " .. window:title())
                     end
                 end
             end
