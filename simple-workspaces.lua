@@ -641,7 +641,16 @@ applyWorkspaceWindows = function(workspace, builtInScreen, builtInScreenFrame)
                 local app = hs.application.get(bundleID)
                 if not app then
                     log("App not running, launching: " .. bundleID)
-                    app = hs.application.launchOrFocus(bundleID)
+                    -- Try to launch by bundle ID first, then fall back to name
+                    local success = hs.application.launchOrFocusByBundleID(bundleID)
+                    if success then
+                        -- Wait for app to launch
+                        hs.timer.doAfter(2, function()
+                            app = hs.application.get(bundleID)
+                        end)
+                    else
+                        log("Failed to launch app with bundle ID: " .. bundleID)
+                    end
                 end
                 
                 if app then
