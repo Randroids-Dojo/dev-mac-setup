@@ -945,6 +945,12 @@ function simpleWorkspaces.saveCurrentDesktop(name, shortcutKey)
             end
         end
         
+        -- If we couldn't find the focused space, default to desktop 1
+        if currentDesktopIndex == nil and #screenSpaces > 0 then
+            currentDesktopIndex = 1
+            log("Warning: Could not find focused space in screen spaces, defaulting to desktop 1")
+        end
+        
         log("Current desktop index: " .. tostring(currentDesktopIndex))
     end
     
@@ -1456,6 +1462,13 @@ local function cleanupWorkspaces()
                 end
                 -- Remove old spaceID
                 workspace.spaceID = nil
+                needsSave = true
+            end
+            
+            -- Fix workspaces that have spaceSupported but missing desktopIndex
+            if workspace.spaceSupported and not workspace.desktopIndex and #screenSpaces > 0 then
+                workspace.desktopIndex = 1  -- Default to desktop 1
+                log("Fixed missing desktopIndex for workspace '" .. workspace.name .. "', defaulting to desktop 1")
                 needsSave = true
             end
             

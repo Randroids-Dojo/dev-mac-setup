@@ -33,6 +33,24 @@ cp simple-workspaces.lua "$HAMMERSPOON_DIR/"
 chmod 644 "$HAMMERSPOON_DIR/init.lua"
 chmod 644 "$HAMMERSPOON_DIR/simple-workspaces.lua"
 
+# Optional: Copy example workspaces
+if [ -f "example-workspaces.json" ]; then
+    echo ""
+    echo "📋 Found example workspaces. Would you like to install them? (y/n)"
+    read -r response
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+        if [ -f "$HAMMERSPOON_DIR/simple-workspaces.json" ]; then
+            echo "📦 Backing up existing workspaces to simple-workspaces.json.backup"
+            cp "$HAMMERSPOON_DIR/simple-workspaces.json" "$HAMMERSPOON_DIR/simple-workspaces.json.backup"
+        fi
+        cp example-workspaces.json "$HAMMERSPOON_DIR/simple-workspaces.json"
+        chmod 644 "$HAMMERSPOON_DIR/simple-workspaces.json"
+        echo "✅ Example workspaces installed!"
+    else
+        echo "⏭️  Skipping example workspaces installation"
+    fi
+fi
+
 echo "✅ Installation complete!"
 echo ""
 echo "🚀 Next steps:"
