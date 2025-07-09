@@ -133,44 +133,34 @@ end
 
 -- Restore windows for workspace
 local function restoreWindows(workspace, builtInScreen, builtInScreenFrame)
-    -- Hide all apps first
-    local apps = hs.application.runningApplications()
-    for _, app in ipairs(apps) do
-        if app:bundleID() ~= "com.apple.dock" then
-            app:hide()
+    -- Group windows by app
+    local windowsByApp = {}
+    for _, windowInfo in ipairs(workspace.windows) do
+        if not windowsByApp[windowInfo.bundleID] then
+            windowsByApp[windowInfo.bundleID] = {}
         end
+        table.insert(windowsByApp[windowInfo.bundleID], windowInfo)
     end
     
-    hs.timer.doAfter(0.3, function()
-        -- Group windows by app
-        local windowsByApp = {}
-        for _, windowInfo in ipairs(workspace.windows) do
-            if not windowsByApp[windowInfo.bundleID] then
-                windowsByApp[windowInfo.bundleID] = {}
-            end
-            table.insert(windowsByApp[windowInfo.bundleID], windowInfo)
-        end
-        
-        -- Restore each app
-        for bundleID, windowInfos in pairs(windowsByApp) do
-            local app = hs.application.get(bundleID)
-            if not app then
-                hs.application.launchOrFocusByBundleID(bundleID)
-                hs.timer.doAfter(1, function()
-                    app = hs.application.get(bundleID)
-                    if app then
-                        restoreAppWindows(app, windowInfos, builtInScreen, builtInScreenFrame)
-                    end
-                end)
-            else
-                app:unhide()
-                app:activate()
-                hs.timer.doAfter(0.2, function()
+    -- Restore each app
+    for bundleID, windowInfos in pairs(windowsByApp) do
+        local app = hs.application.get(bundleID)
+        if not app then
+            hs.application.launchOrFocusByBundleID(bundleID)
+            hs.timer.doAfter(1, function()
+                app = hs.application.get(bundleID)
+                if app then
                     restoreAppWindows(app, windowInfos, builtInScreen, builtInScreenFrame)
-                end)
-            end
+                end
+            end)
+        else
+            app:unhide()
+            app:activate()
+            hs.timer.doAfter(0.2, function()
+                restoreAppWindows(app, windowInfos, builtInScreen, builtInScreenFrame)
+            end)
         end
-    end)
+    end
 end
 
 -- Restore windows for a specific app
@@ -192,9 +182,11 @@ local function restoreAppWindows(app, windowInfos, builtInScreen, builtInScreenF
             if app:bundleID() == "com.apple.finder" then
                 app:selectMenuItem({"File", "New Finder Window"})
             else
-                app:selectMenuItem({"File", "New Window"}) or 
-                app:selectMenuItem({"Window", "New Window"}) or 
-                hs.eventtap.keyStroke({"cmd"}, "n")
+                if not app:selectMenuItem({"File", "New Window"}) then
+                    if not app:selectMenuItem({"Window", "New Window"}) then
+                        hs.eventtap.keyStroke({"cmd"}, "n")
+                    end
+                end
             end
             hs.timer.usleep(300000) -- Wait 0.3 seconds between window creation
         end
@@ -219,19 +211,28 @@ local function positionWindows(windows, windowInfos, builtInScreenFrame)
     for i, windowInfo in ipairs(windowInfos) do
         local window = windows[i]
         if window then
-            if windowInfo.isFullscreen then
-                window:setFullScreen(true)
-            else
-                local newFrame = {
-                    x = builtInScreenFrame.x + (windowInfo.frame.x * builtInScreenFrame.w),
-                    y = builtInScreenFrame.y + (windowInfo.frame.y * builtInScreenFrame.h),
-                    w = windowInfo.frame.w * builtInScreenFrame.w,
-                    h = windowInfo.frame.h * builtInScreenFrame.h
-                }
-                window:setFrame(newFrame)
-            end
+            -- First ensure window is unminimized and visible
             window:unminimize()
             window:raise()
+            
+            -- Small delay to ensure window is ready for positioning
+            hs.timer.doAfter(0.1, function()
+                if windowInfo.isFullscreen then
+                    window:setFullScreen(true)
+                else
+                    local newFrame = {
+                        x = builtInScreenFrame.x + (windowInfo.frame.x * builtInScreenFrame.w),
+                        y = builtInScreenFrame.y + (windowInfo.frame.y * builtInScreenFrame.h),
+                        w = windowInfo.frame.w * builtInScreenFrame.w,
+                        h = windowInfo.frame.h * builtInScreenFrame.h
+                    }
+                    window:setFrame(newFrame)
+                end
+                
+                -- Ensure window stays unminimized and visible
+                window:unminimize()
+                window:raise()
+            end)
         end
     end
 end
@@ -272,12 +273,12 @@ function simpleWorkspaces.saveCurrentDesktop(name, desktopIndex)
         desktopIndex = targetDesktopIndex
     }
     
-    -- Remove any existing workspace with same name
+    -- Remove any existing workspace with same name or same desktop index
     loadWorkspacesFromFile()
     for i = #state.workspaces, 1, -1 do
-        if state.workspaces[i].name == workspaceName then
+        if state.workspaces[i].name == workspaceName or 
+           (state.workspaces[i].desktopIndex and state.workspaces[i].desktopIndex == targetDesktopIndex) then
             table.remove(state.workspaces, i)
-            break
         end
     end
     
@@ -305,13 +306,18 @@ function simpleWorkspaces.switchToWorkspaceSlot(slotNumber)
         local screenUUID = builtInScreen:getUUID()
         local screenSpaces = allSpaces[screenUUID] or {}
         
-        -- Use the requested desktop if it exists, otherwise use the slot number as desktop index
-        local actualDesktopIndex = requestedDesktop
-        if requestedDesktop > #screenSpaces then
-            actualDesktopIndex = slotNumber == 0 and math.min(10, #screenSpaces) or math.min(slotNumber, #screenSpaces)
+        -- Create desktops if they don't exist
+        while #screenSpaces < requestedDesktop do
+            log("Creating desktop " .. (#screenSpaces + 1))
+            hs.spaces.addSpaceToScreen(builtInScreen)
+            -- Refresh the spaces list
+            allSpaces = hs.spaces.allSpaces()
+            screenSpaces = allSpaces[screenUUID] or {}
         end
         
-        -- Switch to desktop if it exists
+        local actualDesktopIndex = requestedDesktop
+        
+        -- Switch to desktop (it should exist now)
         if actualDesktopIndex <= #screenSpaces and actualDesktopIndex > 0 then
             local targetSpaceID = screenSpaces[actualDesktopIndex]
             local currentSpace = hs.spaces.focusedSpace()
@@ -320,7 +326,8 @@ function simpleWorkspaces.switchToWorkspaceSlot(slotNumber)
                 hs.spaces.gotoSpace(targetSpaceID)
             end
             
-            -- Find workspace assigned to this desktop
+            -- Find workspace assigned to this desktop (reload to get latest data)
+            loadWorkspacesFromFile()
             local targetWorkspace = nil
             for _, workspace in ipairs(state.workspaces) do
                 if workspace.desktopIndex == actualDesktopIndex then
@@ -383,6 +390,20 @@ function simpleWorkspaces.showSaveDialog()
         end
     end)
     inputChooser:show()
+end
+
+-- Get workspace mappings for help display
+function simpleWorkspaces.getWorkspaceMappings()
+    loadWorkspacesFromFile()
+    local mappings = {}
+    
+    for _, workspace in ipairs(state.workspaces) do
+        if workspace.desktopIndex then
+            mappings[workspace.desktopIndex] = workspace.name
+        end
+    end
+    
+    return mappings
 end
 
 -- Initialize
