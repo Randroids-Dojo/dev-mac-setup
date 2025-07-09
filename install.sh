@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Hammerspoon Workspace Manager Installation Script
+# Simple Hammerspoon Workspace Manager Installation Script
 # Usage: ./install.sh
 
 set -e
 
-echo "🔧 Installing Hammerspoon Workspace Manager..."
+echo "🔧 Installing Simple Hammerspoon Workspace Manager..."
 
 # Check if Hammerspoon is installed
 if ! command -v hs &> /dev/null; then
@@ -56,10 +56,11 @@ echo ""
 echo "🚀 Next steps:"
 echo "1. Grant Hammerspoon accessibility permissions in System Preferences"
 echo "2. Reload Hammerspoon configuration (⌘⌥⌃+R)"
-echo "3. Open workspace manager with ⌘⌥⌃+W"
+echo "3. Save your first workspace (⌘⌥⌃+S)"
 echo ""
 echo "📚 Keyboard shortcuts:"
-echo "   ⌘⌥⌃+W  - Open workspace manager"
-echo "   ⌘⌥⌃+S  - Save current desktop as workspace"
-echo "   ⌘⌥⌃+R  - Reload Hammerspoon"
-echo "   ⌘⌥⌃+/  - Show help"
+echo "   ⌘⌥⌃+S    - Save current desktop as workspace"
+echo "   ⌘⌥⌃+0-9  - Switch to desktop/workspace (0 = desktop 10)"
+echo "   ⌘⌥⌃+R    - Reload Hammerspoon"
+echo "   ⌘⌥⌃+C    - Show console"
+echo "   ⌘⌥⌃+/    - Show help"

@@ -1,13 +1,14 @@
-# Hammerspoon Workspace Manager
+# Simple Hammerspoon Workspace Manager
 
-Save and restore window layouts on macOS with custom shortcuts.
+Save and restore window layouts on macOS with simple desktop shortcuts.
 
 ## Features
 
-- **Visual workspace manager** with native macOS interface
-- **Intelligent window restoration** - creates missing app instances automatically
-- **Conflict detection** - prevents duplicate names and shortcuts
-- **MacBook display focus** - manages laptop screen only
+- **Simple workspace creation** - Save current window layout with ⌘⌥⌃+S
+- **Desktop assignment** - Assign workspaces to desktop slots 0-9
+- **Automatic desktop creation** - Creates desktops as needed when switching
+- **MacBook display focus** - Manages built-in screen only
+- **Smart window restoration** - Restores apps and window positions
 
 ## Installation
 
@@ -19,17 +20,25 @@ Save and restore window layouts on macOS with custom shortcuts.
 
 | Shortcut | Action |
 |----------|--------|
-| **⌘⌥⌃+W** | Open workspace manager |
-| **⌘⌥⌃+S** | Save current layout |
+| **⌘⌥⌃+S** | Save current desktop as workspace |
+| **⌘⌥⌃+0-9** | Switch to desktop/workspace (0 = desktop 10) |
 | **⌘⌥⌃+R** | Reload Hammerspoon |
+| **⌘⌥⌃+C** | Show console |
 | **⌘⌥⌃+/** | Show help |
 
 ### Creating Workspaces
 
-1. Arrange windows as desired
-2. Press **⌘⌥⌃+S** to save
-3. Enter name and shortcut key (a-z, 0-9)
-4. Apply anytime with **⌘⌥⌃+W** or custom shortcut
+1. Arrange windows as desired on current desktop
+2. Press **⌘⌥⌃+S** to save workspace
+3. Enter workspace name and desktop slot (0-9)
+4. Switch anytime with **⌘⌥⌃+[0-9]**
+
+### Switching Workspaces
+
+- **⌘⌥⌃+1** through **⌘⌥⌃+9** - Switch to desktops 1-9
+- **⌘⌥⌃+0** - Switch to desktop 10
+- If no workspace is saved, just switches to empty desktop
+- If workspace is saved, restores the saved window layout
 
 ## Files
 
@@ -42,8 +51,9 @@ Save and restore window layouts on macOS with custom shortcuts.
 
 ## Troubleshooting
 
-- **Shortcuts not working**: Check accessibility permissions
-- **Positioning issues**: Re-save workspace with current layout
+- **Shortcuts not working**: Check accessibility permissions in System Preferences
+- **Desktop not switching**: Ensure you have enough desktops or let the system create them
+- **Windows not restoring**: Re-save workspace with current layout
 - **Apps not launching**: Verify app is in Applications folder
 
-Enable debug mode: Set `DEBUG = true` in `init.lua`
+For debugging, check Hammerspoon Console (⌘⌥⌃+C) for error messages.

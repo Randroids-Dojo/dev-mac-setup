@@ -15,7 +15,7 @@ local state = {
 
 -- Utility functions
 local function log(message)
-    print("SimpleWorkspaces: " .. message)
+    print("[SimpleWorkspaces] " .. message)
 end
 
 local function getBuiltInScreen()
@@ -243,7 +243,7 @@ function simpleWorkspaces.saveCurrentDesktop(name, desktopIndex)
     
     if not workspaceName or workspaceName == "" then
         log("Save cancelled: no workspace name provided")
-        return
+        return nil
     end
     
     -- Get desktop index
@@ -274,7 +274,6 @@ function simpleWorkspaces.saveCurrentDesktop(name, desktopIndex)
     }
     
     -- Remove any existing workspace with same name or same desktop index
-    loadWorkspacesFromFile()
     for i = #state.workspaces, 1, -1 do
         if state.workspaces[i].name == workspaceName or 
            (state.workspaces[i].desktopIndex and state.workspaces[i].desktopIndex == targetDesktopIndex) then
@@ -296,7 +295,7 @@ end
 function simpleWorkspaces.switchToWorkspaceSlot(slotNumber)
     loadWorkspacesFromFile()
     
-    -- Use slot number directly as desktop index (0-9 maps to desktops 1-10, but limit to available desktops)
+    -- Convert slot number to desktop index (0 maps to desktop 10)
     local requestedDesktop = slotNumber == 0 and 10 or slotNumber
     
     -- Always switch to the desktop first
@@ -326,8 +325,7 @@ function simpleWorkspaces.switchToWorkspaceSlot(slotNumber)
                 hs.spaces.gotoSpace(targetSpaceID)
             end
             
-            -- Find workspace assigned to this desktop (reload to get latest data)
-            loadWorkspacesFromFile()
+            -- Find workspace assigned to this desktop
             local targetWorkspace = nil
             for _, workspace in ipairs(state.workspaces) do
                 if workspace.desktopIndex == actualDesktopIndex then
@@ -394,7 +392,6 @@ end
 
 -- Get workspace mappings for help display
 function simpleWorkspaces.getWorkspaceMappings()
-    loadWorkspacesFromFile()
     local mappings = {}
     
     for _, workspace in ipairs(state.workspaces) do
