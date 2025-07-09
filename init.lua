@@ -1,29 +1,15 @@
--- Hammerspoon Configuration for Workspace Management
--- Author: Custom workspace automation
-
--- Debug mode - set to true to see debug messages
-local DEBUG = true
+-- Hammerspoon Configuration for Simple Workspace Management
+-- Simplified version: workspace creation and 0-9 desktop assignment only
 
 -- Load Simple Workspace Manager
-local visualWorkspaces = require("simple-workspaces")
-
--- Helper function for debug logging
-local function debug(message)
-    if DEBUG then
-        print("DEBUG: " .. message)
-    end
-end
+local simpleWorkspaces = require("simple-workspaces")
 
 -- Configuration
 local config = {
-    -- Modifier keys for hotkeys (using Option key on Mac)
     hyper = {"cmd", "alt", "ctrl"}
 }
 
--- Setup Hotkeys
-debug("Setting up hotkeys...")
-
--- Additional Utility Hotkeys
+-- Utility Hotkeys
 hs.hotkey.bind(config.hyper, "r", function()
     hs.reload()
     hs.alert.show("Hammerspoon Reloaded")
@@ -37,68 +23,42 @@ hs.hotkey.bind(config.hyper, "c", function()
     end
 end)
 
--- Visual Workspace Manager
-hs.hotkey.bind({"cmd", "alt", "ctrl"}, "w", function()
-    visualWorkspaces.toggle()
+-- Save current desktop as workspace
+hs.hotkey.bind(config.hyper, "s", function()
+    simpleWorkspaces.showSaveDialog()
 end)
 
-hs.hotkey.bind({"cmd", "alt", "ctrl"}, "s", function()
-    -- Use the visual workspace manager's input system for consistency
-    visualWorkspaces.showSaveDialog()
+-- Switch to workspace shortcuts (0-9)
+for i = 1, 9 do
+    hs.hotkey.bind(config.hyper, tostring(i), function()
+        simpleWorkspaces.switchToWorkspaceSlot(i)
+    end)
+end
+
+-- Desktop 10 mapped to key "0"
+hs.hotkey.bind(config.hyper, "0", function()
+    simpleWorkspaces.switchToWorkspaceSlot(10)
 end)
 
--- Window Management Helpers
-hs.hotkey.bind(config.hyper, "h", function()
-    local apps = hs.application.runningApplications()
-    for _, app in ipairs(apps) do
-        if app:bundleID() ~= "com.apple.finder" and app:bundleID() ~= "com.apple.dock" then
-            app:hide()
-        end
-    end
-    hs.alert.show("All apps hidden")
-end)
-
--- Debug hotkey removed - validation works correctly
-
--- Initialize
-hs.alert.show("Hammerspoon Workspace Manager Loaded")
-debug("Configuration loaded successfully")
-
--- Test hotkey to verify Hammerspoon is working (disabled)
--- hs.hotkey.bind(config.hyper, "t", function()
---     hs.alert.show("Test hotkey works!")
--- end)
-
--- Show available hotkeys
+-- Show hotkey help
 local function showHotkeys()
     local message = [[
-Workspace Manager Hotkeys:
+Simple Workspace Manager:
 
-Visual Workspace Manager:
-⌘⌥⌃ + W: Open Visual Workspace Manager
 ⌘⌥⌃ + S: Save Current Desktop as Workspace
+⌘⌥⌃ + 0-9: Switch to Workspace (0 = Desktop 10)
 
 Utilities:
 ⌘⌥⌃ + R: Reload Hammerspoon
 ⌘⌥⌃ + C: Show Console
-⌘⌥⌃ + H: Hide All Apps
 ⌘⌥⌃ + /: Show This Help
+
+Note: ⌘ = Command, ⌥ = Option, ⌃ = Control
 ]]
-    
-    -- Get saved workspaces with shortcuts
-    local workspaces = visualWorkspaces.getWorkspacesForHelp()
-    if workspaces and #workspaces > 0 then
-        message = message .. "\nSaved Workspaces:\n"
-        for _, workspace in ipairs(workspaces) do
-            message = message .. "⌘⌥⌃ + " .. workspace.shortcutKey .. ": " .. workspace.name .. "\n"
-        end
-    else
-        message = message .. "\nNo saved workspaces yet. Use ⌘⌥⌃+S to create one!\n"
-    end
-    
-    message = message .. "\nNote: ⌘ = Command, ⌥ = Option, ⌃ = Control"
-    
     hs.alert.show(message, 5)
 end
 
 hs.hotkey.bind(config.hyper, "/", showHotkeys)
+
+-- Initialize
+hs.alert.show("Simple Workspace Manager Loaded")
