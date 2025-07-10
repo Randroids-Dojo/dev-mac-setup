@@ -100,6 +100,226 @@ local function getAllWindowInfo()
     return windows
 end
 
+-- Intelligently position windows by matching them to expected layouts
+local function positionWindowsIntelligently(windows, windowInfos, builtInScreenFrame)
+    log("Intelligently positioning " .. #windows .. " windows against " .. #windowInfos .. " expected layouts")
+    
+    -- Match windows to layouts by title first, then by position proximity
+    local matches = {}
+    local usedWindows = {}
+    
+    -- First pass: match by title
+    for i, windowInfo in ipairs(windowInfos) do
+        for j, window in ipairs(windows) do
+            if not usedWindows[j] and window:title() == windowInfo.title then
+                matches[i] = window
+                usedWindows[j] = true
+                log("Matched window " .. i .. " by title: " .. window:title())
+                break
+            end
+        end
+    end
+    
+    -- Second pass: match remaining windows by current position proximity
+    for i, windowInfo in ipairs(windowInfos) do
+        if not matches[i] then
+            local bestMatch = nil
+            local bestDistance = math.huge
+            local bestIndex = nil
+            
+            for j, window in ipairs(windows) do
+                if not usedWindows[j] then
+                    local currentFrame = window:frame()
+                    local screenFrame = builtInScreenFrame
+                    
+                    -- Calculate normalized positions
+                    local currentX = (currentFrame.x - screenFrame.x) / screenFrame.w
+                    local currentY = (currentFrame.y - screenFrame.y) / screenFrame.h
+                    
+                    -- Calculate distance to expected position
+                    local dx = math.abs(currentX - windowInfo.frame.x)
+                    local dy = math.abs(currentY - windowInfo.frame.y)
+                    local distance = dx + dy
+                    
+                    if distance < bestDistance then
+                        bestDistance = distance
+                        bestMatch = window
+                        bestIndex = j
+                    end
+                end
+            end
+            
+            if bestMatch then
+                matches[i] = bestMatch
+                usedWindows[bestIndex] = true
+                log("Matched window " .. i .. " by proximity: " .. bestMatch:title())
+            end
+        end
+    end
+    
+    -- Third pass: fill remaining slots with any unused windows
+    for i, windowInfo in ipairs(windowInfos) do
+        if not matches[i] then
+            for j, window in ipairs(windows) do
+                if not usedWindows[j] then
+                    matches[i] = window
+                    usedWindows[j] = true
+                    log("Matched window " .. i .. " by availability: " .. window:title())
+                    break
+                end
+            end
+        end
+    end
+    
+    -- Position the matched windows
+    for i, windowInfo in ipairs(windowInfos) do
+        local window = matches[i]
+        if window then
+            log("Positioning window " .. i .. ": " .. (window:title() or "Untitled") .. 
+                " (expected: " .. (windowInfo.title or "Unknown") .. ")")
+            
+            -- First ensure window is unminimized and visible
+            window:unminimize()
+            window:raise()
+            
+            -- Small delay to ensure window is ready for positioning
+            hs.timer.doAfter(0.1 * i, function() -- Stagger the positioning
+                if windowInfo.isFullscreen then
+                    log("Setting window " .. i .. " to fullscreen")
+                    window:setFullScreen(true)
+                else
+                    local newFrame = {
+                        x = builtInScreenFrame.x + (windowInfo.frame.x * builtInScreenFrame.w),
+                        y = builtInScreenFrame.y + (windowInfo.frame.y * builtInScreenFrame.h),
+                        w = windowInfo.frame.w * builtInScreenFrame.w,
+                        h = windowInfo.frame.h * builtInScreenFrame.h
+                    }
+                    
+                    log("Setting window " .. i .. " frame to: " .. 
+                        string.format("x=%.0f y=%.0f w=%.0f h=%.0f", 
+                                      newFrame.x, newFrame.y, newFrame.w, newFrame.h))
+                    
+                    window:setFrame(newFrame)
+                end
+                
+                -- Ensure window stays unminimized and visible
+                window:unminimize()
+                window:raise()
+            end)
+        else
+            log("Warning: No window available for layout " .. i .. " (expected: " .. (windowInfo.title or "Unknown") .. ")")
+        end
+    end
+end
+
+-- Position windows according to saved layout (backward compatibility)
+local function positionWindows(windows, windowInfos, builtInScreenFrame)
+    positionWindowsIntelligently(windows, windowInfos, builtInScreenFrame)
+end
+
+-- Restore windows for a specific app
+local function restoreAppWindows(app, windowInfos, builtInScreen, builtInScreenFrame)
+    local windows = app:allWindows()
+    
+    -- Filter to built-in screen windows
+    local screenWindows = {}
+    for _, window in ipairs(windows) do
+        if window:screen():id() == builtInScreen:id() and window:isVisible() and window:isStandard() then
+            table.insert(screenWindows, window)
+        end
+    end
+    
+    local expectedWindows = #windowInfos
+    local actualWindows = #screenWindows
+    
+    log("App " .. app:name() .. " - Expected: " .. expectedWindows .. ", Actual: " .. actualWindows)
+    
+    -- Create additional windows if needed
+    local needWindows = expectedWindows - actualWindows
+    if needWindows > 0 then
+        log("Creating " .. needWindows .. " missing windows for " .. app:name())
+        
+        for i = 1, needWindows do
+            local success = false
+            
+            if app:bundleID() == "com.apple.finder" then
+                success = app:selectMenuItem({"File", "New Finder Window"})
+            else
+                -- Try common menu paths for creating new windows
+                success = app:selectMenuItem({"File", "New Window"})
+                if not success then
+                    success = app:selectMenuItem({"Window", "New Window"})
+                end
+                if not success then
+                    success = app:selectMenuItem({"File", "New"})
+                end
+                if not success then
+                    -- Fallback to keyboard shortcut
+                    hs.eventtap.keyStroke({"cmd"}, "n")
+                    success = true
+                end
+            end
+            
+            if success then
+                log("Created window " .. i .. " for " .. app:name())
+            else
+                log("Failed to create window " .. i .. " for " .. app:name())
+            end
+            
+            hs.timer.usleep(300000) -- Wait 0.3 seconds between window creation
+        end
+        
+        -- Wait for windows to be created then position them
+        hs.timer.doAfter(1.5, function()
+            screenWindows = {}
+            for _, window in ipairs(app:allWindows()) do
+                if window:screen():id() == builtInScreen:id() and window:isVisible() and window:isStandard() then
+                    table.insert(screenWindows, window)
+                end
+            end
+            log("After window creation - " .. app:name() .. " now has " .. #screenWindows .. " windows")
+            positionWindowsIntelligently(screenWindows, windowInfos, builtInScreenFrame)
+        end)
+    else
+        positionWindowsIntelligently(screenWindows, windowInfos, builtInScreenFrame)
+    end
+end
+
+-- Restore windows for workspace
+local function restoreWindows(workspace, builtInScreen, builtInScreenFrame)
+    log("Restoring " .. #workspace.windows .. " expected windows for workspace: " .. workspace.name)
+    
+    -- Group windows by app
+    local windowsByApp = {}
+    for _, windowInfo in ipairs(workspace.windows) do
+        if not windowsByApp[windowInfo.bundleID] then
+            windowsByApp[windowInfo.bundleID] = {}
+        end
+        table.insert(windowsByApp[windowInfo.bundleID], windowInfo)
+    end
+    
+    -- Restore each app
+    for bundleID, windowInfos in pairs(windowsByApp) do
+        local app = hs.application.get(bundleID)
+        if not app then
+            log("Launching missing app: " .. bundleID)
+            hs.application.launchOrFocusByBundleID(bundleID)
+            hs.timer.doAfter(1, function()
+                app = hs.application.get(bundleID)
+                if app then
+                    restoreAppWindows(app, windowInfos, builtInScreen, builtInScreenFrame)
+                end
+            end)
+        else
+            app:unhide()
+            app:activate()
+            hs.timer.doAfter(0.2, function()
+                restoreAppWindows(app, windowInfos, builtInScreen, builtInScreenFrame)
+            end)
+        end
+    end
+end
+
 -- Apply workspace configuration
 local function applyWorkspace(workspace)
     log("Applying workspace: " .. workspace.name)
@@ -131,111 +351,6 @@ local function applyWorkspace(workspace)
     restoreWindows(workspace, builtInScreen, builtInScreenFrame)
 end
 
--- Restore windows for workspace
-local function restoreWindows(workspace, builtInScreen, builtInScreenFrame)
-    -- Group windows by app
-    local windowsByApp = {}
-    for _, windowInfo in ipairs(workspace.windows) do
-        if not windowsByApp[windowInfo.bundleID] then
-            windowsByApp[windowInfo.bundleID] = {}
-        end
-        table.insert(windowsByApp[windowInfo.bundleID], windowInfo)
-    end
-    
-    -- Restore each app
-    for bundleID, windowInfos in pairs(windowsByApp) do
-        local app = hs.application.get(bundleID)
-        if not app then
-            hs.application.launchOrFocusByBundleID(bundleID)
-            hs.timer.doAfter(1, function()
-                app = hs.application.get(bundleID)
-                if app then
-                    restoreAppWindows(app, windowInfos, builtInScreen, builtInScreenFrame)
-                end
-            end)
-        else
-            app:unhide()
-            app:activate()
-            hs.timer.doAfter(0.2, function()
-                restoreAppWindows(app, windowInfos, builtInScreen, builtInScreenFrame)
-            end)
-        end
-    end
-end
-
--- Restore windows for a specific app
-local function restoreAppWindows(app, windowInfos, builtInScreen, builtInScreenFrame)
-    local windows = app:allWindows()
-    
-    -- Filter to built-in screen windows
-    local screenWindows = {}
-    for _, window in ipairs(windows) do
-        if window:screen():id() == builtInScreen:id() and window:isVisible() and window:isStandard() then
-            table.insert(screenWindows, window)
-        end
-    end
-    
-    -- Create additional windows if needed
-    local needWindows = #windowInfos - #screenWindows
-    if needWindows > 0 then
-        for i = 1, needWindows do
-            if app:bundleID() == "com.apple.finder" then
-                app:selectMenuItem({"File", "New Finder Window"})
-            else
-                if not app:selectMenuItem({"File", "New Window"}) then
-                    if not app:selectMenuItem({"Window", "New Window"}) then
-                        hs.eventtap.keyStroke({"cmd"}, "n")
-                    end
-                end
-            end
-            hs.timer.usleep(300000) -- Wait 0.3 seconds between window creation
-        end
-        
-        -- Wait for windows to be created
-        hs.timer.doAfter(1, function()
-            screenWindows = {}
-            for _, window in ipairs(app:allWindows()) do
-                if window:screen():id() == builtInScreen:id() and window:isVisible() and window:isStandard() then
-                    table.insert(screenWindows, window)
-                end
-            end
-            positionWindows(screenWindows, windowInfos, builtInScreenFrame)
-        end)
-    else
-        positionWindows(screenWindows, windowInfos, builtInScreenFrame)
-    end
-end
-
--- Position windows according to saved layout
-local function positionWindows(windows, windowInfos, builtInScreenFrame)
-    for i, windowInfo in ipairs(windowInfos) do
-        local window = windows[i]
-        if window then
-            -- First ensure window is unminimized and visible
-            window:unminimize()
-            window:raise()
-            
-            -- Small delay to ensure window is ready for positioning
-            hs.timer.doAfter(0.1, function()
-                if windowInfo.isFullscreen then
-                    window:setFullScreen(true)
-                else
-                    local newFrame = {
-                        x = builtInScreenFrame.x + (windowInfo.frame.x * builtInScreenFrame.w),
-                        y = builtInScreenFrame.y + (windowInfo.frame.y * builtInScreenFrame.h),
-                        w = windowInfo.frame.w * builtInScreenFrame.w,
-                        h = windowInfo.frame.h * builtInScreenFrame.h
-                    }
-                    window:setFrame(newFrame)
-                end
-                
-                -- Ensure window stays unminimized and visible
-                window:unminimize()
-                window:raise()
-            end)
-        end
-    end
-end
 
 -- Save current desktop as workspace
 function simpleWorkspaces.saveCurrentDesktop(name, desktopIndex)
