@@ -6,7 +6,7 @@ local simpleWorkspaces = require("simple-workspaces")
 
 -- Configuration
 local config = {
-    hyper = {"cmd", "alt", "ctrl"}
+    hyper = {"ctrl", "alt", "shift"}
 }
 
 -- Utility Hotkeys
@@ -42,7 +42,7 @@ end)
 
 -- Show hotkey help
 local function showHotkeys()
-    local message = "Simple Workspace Manager:\n\n⌘⌥⌃+S: Save Current Desktop as Workspace\n⌘⌥⌃+0-9: Switch to Workspace (0=Desktop 10)\n\nUtilities: R=Reload, C=Console, /=Help\n"
+    local message = "Simple Workspace Manager:\n\n⌃⌥⇧+S: Save Current Desktop as Workspace\n⌃⌥⇧+0-9: Switch to Workspace (0=Desktop 10)\n\nUtilities: R=Reload, C=Console, /=Help\n"
     
     -- Get workspace mappings - show only assigned ones to save space
     local workspaceMappings = simpleWorkspaces.getWorkspaceMappings()
@@ -52,11 +52,11 @@ local function showHotkeys()
             local key = i == 10 and "0" or tostring(i)
             local workspace = workspaceMappings[i]
             if workspace then
-                message = message .. "⌘⌥⌃+" .. key .. ": " .. workspace .. "\n"
+                message = message .. "⌃⌥⇧+" .. key .. ": " .. workspace .. "\n"
             end
         end
     else
-        message = message .. "\nNo workspaces saved yet. Use ⌘⌥⌃+S to create one!"
+        message = message .. "\nNo workspaces saved yet. Use ⌃⌥⇧+S to create one!"
     end
     
     -- Create a custom alert positioned higher on screen
